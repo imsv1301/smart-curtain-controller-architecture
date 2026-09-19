@@ -2,7 +2,7 @@
 
 Firmware architecture for a production IoT curtain controller I built during my final-year engineering internship at [CosmicX](https://www.thecosmicx.com), a smart security and automation company based in Anand, Gujarat.
 
-The system runs on an ESP32-S3, uses a TMC2209 stepper driver for silent motor control, and supports two wireless modes: full cloud control over Wi-Fi + MQTT, and local BLE control via NimBLE — without running both as simultaneous control interfaces.
+The system runs on an ESP32-S3, uses a TMC2209 stepper driver for silent motor control, and supports two wireless modes: full cloud control over Wi-Fi + MQTT, and local BLE control via NimBLE, without running both as simultaneous control interfaces.
 
 > **Note:** This repository documents the firmware architecture, design decisions, and system behaviour. Source code is proprietary to CosmicX and is not included.
 
@@ -10,7 +10,7 @@ The system runs on an ESP32-S3, uses a TMC2209 stepper driver for silent motor c
 
 ## What the system does
 
-A curtain motor controller that you can command from a phone, from anywhere. Open, close, stop, set to a specific position. The device also detects end-stops without physical limit switches, updates its own firmware over Wi-Fi, and provisions its Wi-Fi credentials wirelessly over Bluetooth — no USB cable, no serial terminal.
+A curtain motor controller that you can command from a phone, from anywhere. Open, close, stop, set to a specific position. The device also detects end-stops without physical limit switches, updates its own firmware over Wi-Fi, and provisions its Wi-Fi credentials wirelessly over Bluetooth. No USB cable, no serial terminal.
 
 Numbers from bench testing:
 - **47 ms** mean BLE command response (50 trials, 1 m distance)
@@ -28,7 +28,7 @@ Numbers from bench testing:
 |-----------|------|------|
 | MCU | ESP32-S3-MINI-1 (N8) | Dual-core LX7, BLE 5.0, Wi-Fi, 8 MB flash |
 | Motor driver | TMC2209 | Half-duplex UART, StealthChop2, StallGuard2 |
-| Power management | CH224K | USB-PD negotiator — requests 12 V from charger |
+| Power management | CH224K | USB-PD negotiator, requests 12 V from the charger |
 | Buck converter | NPN3613-33 | 12 V → 3.3 V for logic rails |
 | PCB | PD_Stepper_V1 Rev 1.1 | Custom KiCad board, ~80 × 65 mm |
 
@@ -88,7 +88,7 @@ Detailed write-ups for each layer are in [`architecture/`](./architecture/).
 
 ## Boot sequence
 
-Order is strict. The USB-PD CFG pins must be set before anything else draws current — if the board initialises NVS first, the 50–100 ms delay can cause the motor coils to see 5 V instead of 12 V, which causes stall false-positives on first move.
+Order is strict. The USB-PD CFG pins must be set before anything else draws current. If the board initialises NVS first, the 50–100 ms delay can cause the motor coils to see 5 V instead of 12 V, which causes stall false-positives on first move.
 
 ```
 [0]  usbpd_12v_init()          — CFG1=LOW, CFG2=LOW, CFG3=HIGH → request 12 V
@@ -113,9 +113,9 @@ The device joins the configured 802.11 b/g/n access point. All curtain commands 
 
 ### Mode 2 — BLE + MQTT
 
-BLE is the primary control interface. Wi-Fi stays active for cloud telemetry only — it does not accept curtain commands. BLE and Wi-Fi never act as simultaneous control radios; they share the 2.4 GHz antenna and time-division is handled by the ESP-IDF coexistence layer.
+BLE is the primary control interface. Wi-Fi stays active for cloud telemetry only and does not accept curtain commands. BLE and Wi-Fi never act as simultaneous control radios; they share the 2.4 GHz antenna and time-division is handled by the ESP-IDF coexistence layer.
 
-**Why not both at the same time?** RF coexistence on a single antenna adds latency and makes timing unpredictable. For a curtain — where 47 ms feels instant — the trade-off isn't worth it.
+**Why not both at the same time?** RF coexistence on a single antenna adds latency and makes timing unpredictable. For a curtain, where 47 ms already feels instant, the trade-off isn't worth it.
 
 ---
 
@@ -164,13 +164,13 @@ The LWT is configured at connection time. When the device drops off the network,
 
 StallGuard2 monitors back-EMF. When the curtain hits a wall and the motor stalls, back-EMF drops. The TMC2209 compares this against the SGTHRS register (set to 50 in this design). If the load exceeds the threshold, it raises the DIAG pin. The ESP32-S3 has an interrupt on GPIO16 that posts a `STALL` event to the curtain FSM queue.
 
-This replaces physical limit switches at normal operating speeds. The 2% failure rate we measured happens below 5% rated speed — back-EMF at that speed is too small to distinguish from noise. AUX1 (GPIO14) and AUX2 (GPIO13) are wired as hardware backup for low-speed calibration.
+This replaces physical limit switches at normal operating speeds. The 2% failure rate we measured happens below 5% rated speed, where back-EMF is too small to distinguish from noise. AUX1 (GPIO14) and AUX2 (GPIO13) are wired as hardware backup for low-speed calibration.
 
 ---
 
 ## OTA firmware updates
 
-The 8 MB flash is partitioned into two 3 MB app slots (`ota_0`, `ota_1`). OTA runs in Mode 1 only — it needs a stable Wi-Fi link.
+The 8 MB flash is partitioned into two 3 MB app slots (`ota_0`, `ota_1`). OTA runs in Mode 1 only because it needs a stable Wi-Fi link.
 
 ```
 Receive MQTT command with firmware URL
@@ -182,7 +182,7 @@ Receive MQTT command with firmware URL
   → if watchdog fires first → bootloader reverts to previous partition
 ```
 
-A bad firmware update cannot permanently brick the device. The rollback window is hard-coded to 30 seconds — same as the watchdog timeout.
+A bad firmware update cannot permanently brick the device. The rollback window is hard-coded to 30 seconds, the same as the watchdog timeout.
 
 ---
 
@@ -204,7 +204,7 @@ CH224K USB-PD negotiator
                     └──► 3.3 V ──► ESP32-S3 + logic
 ```
 
-The CH224K does not convert voltage — it asks the charger for it. A non-PD charger defaults to 5 V, which starves the motor and causes stall false-positives. The device requires an 18 W or higher USB-PD charger.
+The CH224K does not convert voltage. It asks the charger for it. A non-PD charger defaults to 5 V, which starves the motor and causes stall false-positives. The device requires an 18 W or higher USB-PD charger.
 
 ---
 
@@ -239,7 +239,7 @@ I built this firmware during a 6-month final year engineering internship at Cosm
 
 Specifically:
 
-- Wrote the TMC2209 UART driver from scratch — no external library. Raw register writes using the TMC2209 datagram format (SYNC byte, slave address, register, 4-byte data, CRC-8).
+- Wrote the TMC2209 UART driver from scratch with no external library. Raw register writes using the TMC2209 datagram format (SYNC byte, slave address, register, 4-byte data, CRC-8).
 - Implemented the GPTimer-based step pulse generator with trapezoidal acceleration ramping inside the ISR callback.
 - Built the curtain state machine with StallGuard2-based end-stop detection via GPIO16 interrupt.
 - Wrote the NimBLE GATT server with all four characteristics including the BLE-to-Wi-Fi provisioning flow.
@@ -280,6 +280,6 @@ Specifically:
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT. See [LICENSE](./LICENSE).
 
 The firmware source code is proprietary to CosmicX and is not part of this repository.
